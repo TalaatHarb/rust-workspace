@@ -14,9 +14,9 @@ pub enum HttpProtocol {
 }
 
 #[derive(Debug)]
-pub struct HttpHeader {
-    pub header_name: String,
-    pub header_value: String,
+pub struct HttpHeader<'buf> {
+    pub header_name: &'buf str,
+    pub header_value: &'buf str,
 }
 
 #[derive(Debug)]
@@ -45,7 +45,7 @@ impl Display for ParseError {
 }
 impl Error for ParseError {}
 
-pub fn get_parts(buffer: &[u8]) -> Vec<&[u8]> {
+pub fn get_parts(buffer: &[u8]) -> (Vec<&[u8]>, usize) {
     let mut result: Vec<&[u8]> = Vec::new();
 
     let length = buffer.len();
@@ -53,12 +53,19 @@ pub fn get_parts(buffer: &[u8]) -> Vec<&[u8]> {
 
     for i in 0..(length - 1) {
         if buffer[i] == 13 && buffer[i + 1] == 10 {
+            if last_find_end == i {
+                while buffer[last_find_end] != 0 && last_find_end < length{
+                    last_find_end += 1;
+                }
+                result.push(&buffer[i + 2..last_find_end]);
+                break;
+            }
             result.push(&buffer[last_find_end..i]);
             last_find_end = i + 2;
         }
     }
 
-    return result;
+    return (result, last_find_end);
 }
 
 pub fn get_next_word(string: &str) -> Option<(&str, &str)> {
@@ -71,38 +78,27 @@ pub fn get_next_word(string: &str) -> Option<(&str, &str)> {
     return None;
 }
 
-pub fn get_headers_and_body(
-    parts: &Vec<&[u8]>,
-) -> Result<(Vec<HttpHeader>, Option<Vec<u8>>), ParseError> {
-    let length = parts.len();
-    let mut headers: Vec<HttpHeader> = Vec::new(); // can end up empty
+pub fn get_headers<'buf>(
+    parts: &Vec<&'buf [u8]>,
+) -> Result<Vec<HttpHeader<'buf>>, ParseError> {
+    let length: usize = parts.len();
+    let mut headers: Vec<HttpHeader<'buf>> = Vec::new(); // can end up empty
 
     let mut i: usize = 1; // skip first line because it is parsed on its own
-    while i < length {
-        if parts[i] == [] {
-            i += 1;
-            break;
-        }
-
+    while i < length- 1 {
         headers.push(get_header(
             str::from_utf8(parts[i]).or(Err(ParseError::InvalidEncoding))?,
         ));
         i += 1;
     }
-
-    let body: Option<Vec<u8>> = match i {
-        n if n == length => None,
-        _ => Some(parts[i..].iter().flat_map(|s| s.iter().copied()).collect()),
-    };
-
-    return Ok((headers, body));
+    return Ok(headers);
 }
 
 fn get_header(full_header: &str) -> HttpHeader {
     let parts: Vec<&str> = full_header.split(":").collect();
 
-    return HttpHeader{
-        header_name: parts[0].to_string(),
-        header_value: parts[1].to_string()
+    return HttpHeader {
+        header_name: parts[0],
+        header_value: &parts[1], // TODO skip leading whitespace
     };
 }

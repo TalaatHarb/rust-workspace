@@ -1,8 +1,5 @@
 use crate::http::*;
-use std::{
-    convert::TryFrom,
-    str,
-};
+use std::{convert::TryFrom, str};
 
 #[derive(Debug)]
 pub enum HttpMethod {
@@ -18,19 +15,20 @@ pub enum HttpMethod {
 }
 
 #[derive(Debug)]
-pub struct HttpRequest {
+pub struct HttpRequest<'buf> {
+    pub size: usize,
     pub method: HttpMethod,
-    pub path: String,
-    pub query_string: Option<String>,
+    pub path: &'buf str,
+    pub query_string: Option<&'buf str>,
     pub protocol: HttpProtocol,
-    pub headers: Vec<HttpHeader>,
-    pub body: Option<Vec<u8>>,
+    pub headers: Vec<HttpHeader<'buf>>,
+    pub body: &'buf [u8],
 }
 
-impl TryFrom<&[u8]> for HttpRequest {
+impl<'buf> TryFrom<&'buf [u8]> for HttpRequest<'buf> {
     type Error = ParseError;
-    fn try_from(buffer: &[u8]) -> Result<Self, <Self as TryFrom<&[u8]>>::Error> {
-        let parts: Vec<&[u8]> = get_parts(buffer);
+    fn try_from(buffer: &'buf [u8]) -> Result<Self, <Self as TryFrom<&'buf [u8]>>::Error> {
+        let (parts, n) = get_parts(buffer);
         if parts.len() < 1 {
             return Err(ParseError::InvalidRequest);
         }
@@ -41,28 +39,36 @@ impl TryFrom<&[u8]> for HttpRequest {
         let (complete_path, protocol_string) =
             get_next_word(rest_of_request_line).ok_or(ParseError::InvalidRequest)?;
 
-        let path_parts: Vec<&str> = complete_path.split("?").collect();
-        let method = parse_method(method_string).or(Err(ParseError::InvalidMethod))?;
-        let protocol = parse_protocol(protocol_string).or(Err(ParseError::InvalidProtocol))?;
+        let mut path_parts: Vec<&'buf str> = Vec::new();
+        if let Some(i) = complete_path.find('?') {
+            path_parts.push(&complete_path[..i]);
+            path_parts.push(&complete_path[i + 1..]);
+        } else {
+            path_parts.push(complete_path);
+        }
 
-        let (headers, body) = get_headers_and_body(&parts).or(Err(ParseError::InvalidRequest))?; // TODO fix body parsing
+        let method: HttpMethod = parse_method(method_string).or(Err(ParseError::InvalidMethod))?;
+        let protocol: HttpProtocol =
+            parse_protocol(protocol_string).or(Err(ParseError::InvalidProtocol))?;
+        let headers = get_headers(&parts).or(Err(ParseError::InvalidRequest))?;
 
-        return Ok(HttpRequest {
+        return Ok(HttpRequest::<'buf> {
+            size: n,
             method: method,
-            path: path_parts[0].to_string(),
+            path: path_parts[0],
             query_string: match path_parts.len() {
                 1 => None,
-                2 => Some(path_parts[1].to_string()),
+                2 => Some(path_parts[1]),
                 _ => return Err(ParseError::InvalidRequest),
             },
             protocol: protocol,
             headers: headers,
-            body: body,
+            body: parts[parts.len() - 1],
         });
     }
 }
 
-fn parse_protocol(protocol_string: &str) -> Result<HttpProtocol,  ParseError> {
+fn parse_protocol(protocol_string: &str) -> Result<HttpProtocol, ParseError> {
     let protocol: HttpProtocol = match protocol_string {
         "HTTP/0.9" | "" => HttpProtocol::Http09,
         "HTTP/1.0" => HttpProtocol::Http10,
