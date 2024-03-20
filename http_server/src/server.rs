@@ -1,7 +1,7 @@
 use crate::http::*;
 use std::{
     convert::TryFrom,
-    io::Read,
+    io::{Read, Write},
     net::{
         TcpListener,
         TcpStream
@@ -50,6 +50,7 @@ impl HttpServer {
                             match HttpRequest::try_from(&buffer[..]){
                                 Ok(request) => {
                                     dbg!(&request);
+                                    tcp_stream.write(b"Http/1.1 200 OK\r\n\r\n").unwrap();
                                 },
                                 Err(err) => {
                                     eprintln!("Unable to parse buffer into an HttpRequest due to {err}");

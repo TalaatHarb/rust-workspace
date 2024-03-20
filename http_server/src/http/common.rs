@@ -25,6 +25,7 @@ pub enum ParseError {
     InvalidEncoding,
     InvalidProtocol,
     InvalidMethod,
+    InvalidHeader,
 }
 
 impl ParseError {
@@ -34,6 +35,7 @@ impl ParseError {
             Self::InvalidEncoding => "InvalidEncoding",
             Self::InvalidProtocol => "InvalidProtocol",
             Self::InvalidMethod => "InvalidMethod",
+            Self::InvalidHeader => "InvalidHeader",
         }
     }
 }
@@ -54,7 +56,7 @@ pub fn get_parts(buffer: &[u8]) -> (Vec<&[u8]>, usize) {
     for i in 0..(length - 1) {
         if buffer[i] == 13 && buffer[i + 1] == 10 {
             if last_find_end == i {
-                while buffer[last_find_end] != 0 && last_find_end < length{
+                while buffer[last_find_end] != 0 && last_find_end < length {
                     last_find_end += 1;
                 }
                 result.push(&buffer[i + 2..last_find_end]);
@@ -78,27 +80,30 @@ pub fn get_next_word(string: &str) -> Option<(&str, &str)> {
     return None;
 }
 
-pub fn get_headers<'buf>(
-    parts: &Vec<&'buf [u8]>,
-) -> Result<Vec<HttpHeader<'buf>>, ParseError> {
+pub fn get_headers<'buf>(parts: &Vec<&'buf [u8]>) -> Result<Vec<HttpHeader<'buf>>, ParseError> {
     let length: usize = parts.len();
     let mut headers: Vec<HttpHeader<'buf>> = Vec::new(); // can end up empty
 
     let mut i: usize = 1; // skip first line because it is parsed on its own
-    while i < length- 1 {
+    while i < length - 1 {
         headers.push(get_header(
             str::from_utf8(parts[i]).or(Err(ParseError::InvalidEncoding))?,
-        ));
+        )?);
         i += 1;
     }
     return Ok(headers);
 }
 
-fn get_header(full_header: &str) -> HttpHeader {
-    let parts: Vec<&str> = full_header.split(":").collect();
+fn get_header(full_header: &str) -> Result<HttpHeader, ParseError> {
+    let i: Option<usize> = full_header.find(":");
 
-    return HttpHeader {
-        header_name: parts[0],
-        header_value: &parts[1], // TODO skip leading whitespace
-    };
+    match i {
+        Some(location) => {
+            return Ok(HttpHeader {
+                header_name: &full_header[0..location],
+                header_value: &full_header[location + 1..], // TODO skip leading whitespace
+            });
+        }
+        None => return Err(ParseError::InvalidHeader),
+    }
 }
